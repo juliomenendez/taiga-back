@@ -50,6 +50,8 @@ from django.utils.translation import ugettext as _
 
 from taiga.base import response
 
+from django_pglocks import advisory_lock
+
 from .settings import api_settings
 from .utils import get_object_or_404
 
@@ -155,17 +157,38 @@ class RetrieveModelMixin:
         return response.Ok(serializer.data)
 
 
+def model_pk_lock(func):
+    """
+    This decorator is designed to be used in ModelViewsets methods to lock them based
+    on the model and the id of the selected object.
+    """
+    def pk_lock_wrapper(self, *args, **kwargs):
+        from taiga.base.utils.db import get_typename_for_model_class
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        pk = self.kwargs.get(self.pk_url_kwarg, None)
+        tn = get_typename_for_model_class(self.get_queryset().model)
+        key = "{0}:{1}".format(tn, pk)
+
+        with advisory_lock(key) as acquired_key_lock:
+            return func(self, *args, **kwargs)
+
+    return pk_lock_wrapper
+
+
 class UpdateModelMixin:
     """
     Update a model instance.
     """
 
     @tx.atomic
+    @model_pk_lock
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         self.object = self.get_object_or_none()
-
         self.check_permissions(request, 'update', self.object)
+
+        if self.object is None:
+            raise Http404
 
         serializer = self.get_serializer(self.object, data=request.DATA,
                                          files=request.FILES, partial=partial)
@@ -227,6 +250,7 @@ class DestroyModelMixin:
     Destroy a model instance.
     """
     @tx.atomic
+    @model_pk_lock
     def destroy(self, request, *args, **kwargs):
         obj = self.get_object_or_none()
         self.check_permissions(request, 'destroy', obj)
