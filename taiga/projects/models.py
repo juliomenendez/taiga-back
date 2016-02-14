@@ -296,7 +296,7 @@ class Project(ProjectDefaults, TaggedMixin, models.Model):
             self.modified_date = timezone.now()
 
         if not self.slug:
-            base_name = "{}-{}".format(self.owner.username, self.name)
+            base_name = "{}".format(self.name)
             base_slug = slugify_uniquely(base_name, self.__class__)
             slug = base_slug
             for i in arithmetic_progression():
